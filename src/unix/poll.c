@@ -60,6 +60,9 @@ int uv_poll_init(uv_loop_t* loop, uv_poll_t* handle, int fd) {
 
 int uv_poll_init_socket(uv_loop_t* loop, uv_poll_t* handle,
     uv_os_sock_t socket) {
+#if DPDK_PORT
+  libuv_app_set_user_data(socket,handle);
+#endif
   return uv_poll_init(loop, handle, socket);
 }
 

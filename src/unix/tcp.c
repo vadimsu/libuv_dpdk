@@ -45,7 +45,9 @@ static int maybe_new_socket(uv_tcp_t* handle, int domain, int flags) {
   if (err < 0)
     return err;
   sockfd = err;
-
+#if DPDK_PORT
+  /* set tcp->io_watcher as userdata of the socket */
+#endif
   err = uv__stream_open((uv_stream_t*) handle, sockfd, flags);
   if (err) {
     uv__close(sockfd);
@@ -74,9 +76,13 @@ int uv__tcp_bind(uv_tcp_t* tcp,
     return err;
 
   on = 1;
+#if DPDK_PORT
+  if(libuv_app_setsockopt(tcp->io_watcher.fd,SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)))
+    return -1;
+#else
   if (setsockopt(tcp->io_watcher.fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)))
     return -errno;
-
+#endif
 #ifdef IPV6_V6ONLY
   if (addr->sa_family == AF_INET6) {
     on = (flags & UV_TCP_IPV6ONLY) != 0;
@@ -91,8 +97,13 @@ int uv__tcp_bind(uv_tcp_t* tcp,
 #endif
 
   errno = 0;
+#if DPDK_PORT
+  if (libuv_app_bind(tcp->io_watcher.fd, addr, addrlen) && errno != EADDRINUSE)
+    return -errno;
+#else
   if (bind(tcp->io_watcher.fd, addr, addrlen) && errno != EADDRINUSE)
     return -errno;
+#endif
   tcp->delayed_error = -errno;
 
   if (addr->sa_family == AF_INET6)
@@ -124,7 +135,11 @@ int uv__tcp_connect(uv_connect_t* req,
   handle->delayed_error = 0;
 
   do
+#if DPDK_PORT
+    r = libuv_app_connect(uv__stream_fd(handle), addr, addrlen);
+#else
     r = connect(uv__stream_fd(handle), addr, addrlen);
+#endif
   while (r == -1 && errno == EINTR);
 
   if (r == -1) {
@@ -175,10 +190,13 @@ int uv_tcp_getsockname(const uv_tcp_t* handle,
 
   /* sizeof(socklen_t) != sizeof(int) on some systems. */
   socklen = (socklen_t) *namelen;
-
+#if DPDK_PORT
+  if (libuv_app_getsockname(uv__stream_fd(handle), name, &socklen))
+    return -errno;
+#else
   if (getsockname(uv__stream_fd(handle), name, &socklen))
     return -errno;
-
+#endif
   *namelen = (int) socklen;
   return 0;
 }
@@ -197,10 +215,13 @@ int uv_tcp_getpeername(const uv_tcp_t* handle,
 
   /* sizeof(socklen_t) != sizeof(int) on some systems. */
   socklen = (socklen_t) *namelen;
-
+#if DPDK_PORT
+  if (libuv_app_getpeername(uv__stream_fd(handle), name, &socklen))
+    return -errno;
+#else
   if (getpeername(uv__stream_fd(handle), name, &socklen))
     return -errno;
-
+#endif
   *namelen = (int) socklen;
   return 0;
 }
@@ -224,10 +245,13 @@ int uv_tcp_listen(uv_tcp_t* tcp, int backlog, uv_connection_cb cb) {
   err = maybe_new_socket(tcp, AF_INET, UV_STREAM_READABLE);
   if (err)
     return err;
-
+#if DPDK_PORT
+  if (libuv_app_listen(tcp->io_watcher.fd, backlog))
+      return -1;
+#else
   if (listen(tcp->io_watcher.fd, backlog))
     return -errno;
-
+#endif
   tcp->connection_cb = cb;
 
   /* Start listening for connections. */
@@ -239,13 +263,30 @@ int uv_tcp_listen(uv_tcp_t* tcp, int backlog, uv_connection_cb cb) {
 
 
 int uv__tcp_nodelay(int fd, int on) {
+#if DPDK_PORT
+   if (libuv_app_setsockopt(fd,IPPROTO_TCP,TCP_NODELAY,&on,sizeof(on)))
+       return -1;
+#else
   if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on)))
     return -errno;
+#endif
   return 0;
 }
 
 
 int uv__tcp_keepalive(int fd, int on, unsigned int delay) {
+#if DPDK_PORT
+  if(libuv_app_setsockopt(fd, SOL_SOCKET,SO_KEEPALIVE,&on,sizeof(on)))
+      return -1;
+#ifdef TCP_KEEPIDLE
+  if( libuv_app_setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &delay, sizeof(delay)))
+      return -1;
+#endif
+#if defined(TCP_KEEPALIVE) && !defined(__sun)
+  if( libuv_app_setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &delay, sizeof(delay)))
+      return -1;
+#endif
+#else /* DPDK_PORT */
   if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on)))
     return -errno;
 
@@ -262,7 +303,7 @@ int uv__tcp_keepalive(int fd, int on, unsigned int delay) {
   if (on && setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &delay, sizeof(delay)))
     return -errno;
 #endif
-
+#endif
   return 0;
 }
 

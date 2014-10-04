@@ -73,7 +73,9 @@
 #ifdef _AIX
 #include <sys/ioctl.h>
 #endif
-
+#if DPDK_PORT
+#include "dpdk_port.h"
+#endif
 static void uv__run_pending(uv_loop_t* loop);
 
 /* Verify that uv_buf_t is ABI-compatible with struct iovec. */
@@ -179,7 +181,15 @@ int uv__socket_sockopt(uv_handle_t* handle, int optname, int* value) {
     return -ENOTSUP;
 
   len = sizeof(*value);
-
+#if DPDK_PORT
+  if(libuv_is_fd_known(fd)) {
+      if (*value == 0)
+          r = libuv_app_getsockopt(fd, SOL_SOCKET, optname, value, &len);
+      else
+          r = libuv_app_setsockopt(fd, SOL_SOCKET, optname, (const void*) value, len); 
+      return r;
+  }
+#endif
   if (*value == 0)
     r = getsockopt(fd, SOL_SOCKET, optname, value, &len);
   else
@@ -372,6 +382,14 @@ int uv__socket(int domain, int type, int protocol) {
   int err;
 
 #if defined(SOCK_NONBLOCK) && defined(SOCK_CLOEXEC)
+#if DPDK_PORT
+  if((domain == AF_INET)&&((type == SOCK_STREAM)||(type == SOCK_DGRAM)||(type == SOCK_RAW))) {
+      sockfd = libuv_app_socket(domain, type, protocol);
+      if(sockfd < 0)
+         return -1;
+      return sockfd;
+  }
+#endif
   sockfd = socket(domain, type | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
   if (sockfd != -1)
     return sockfd;
@@ -379,8 +397,16 @@ int uv__socket(int domain, int type, int protocol) {
   if (errno != EINVAL)
     return -errno;
 #endif
-
-  sockfd = socket(domain, type, protocol);
+#endif
+#if DPDK_PORT
+  if((domain == AF_INET)&&((type == SOCK_STREAM)||(type == SOCK_DGRAM)||(type == SOCK_RAW))) {
+      sockfd = libuv_app_socket(domain, type, protocol);
+      if(sockfd < 0)
+         return -1;
+      return sockfd;
+  }
+#endif
+  sockfd = socket(domain, type, protocol); 
   if (sockfd == -1)
     return -errno;
 
@@ -399,7 +425,6 @@ int uv__socket(int domain, int type, int protocol) {
     setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
   }
 #endif
-
   return sockfd;
 }
 
@@ -411,6 +436,14 @@ int uv__accept(int sockfd) {
   assert(sockfd >= 0);
 
   while (1) {
+#if DPDK_PORT
+    if(libuv_is_fd_known(fd)) {
+       peerfd = libuv_app_accept(sockfd);
+       if(peerfd > 0)
+          return peerfd;
+       continue;
+    }
+#endif
 #if defined(__linux__) || __FreeBSD__ >= 10
     static int no_accept4;
 
@@ -463,6 +496,10 @@ int uv__close(int fd) {
   assert(fd > STDERR_FILENO);  /* Catch stdio close bugs. */
 
   saved_errno = errno;
+#if DPDK_PORT
+  if(libuv_is_fd_known(fd))
+      return libuv_app_close(fd); 
+#endif
   rc = close(fd);
   if (rc == -1) {
     rc = -errno;
@@ -480,7 +517,10 @@ int uv__close(int fd) {
 
 int uv__nonblock(int fd, int set) {
   int r;
-
+#if DPDK_PORT
+  if(libuv_is_fd_known(fd)) /* non-blocked on creation */
+     return 0;
+#endif
   do
     r = ioctl(fd, FIONBIO, &set);
   while (r == -1 && errno == EINTR);
@@ -494,7 +534,10 @@ int uv__nonblock(int fd, int set) {
 
 int uv__cloexec(int fd, int set) {
   int r;
-
+#if DPDK_PORT
+    if(libuv_is_fd_known(fd))
+        return 0;
+#endif
   do
     r = ioctl(fd, set ? FIOCLEX : FIONCLEX);
   while (r == -1 && errno == EINTR);
@@ -510,7 +553,10 @@ int uv__cloexec(int fd, int set) {
 int uv__nonblock(int fd, int set) {
   int flags;
   int r;
-
+#if DPDK_PORT
+  if(libuv_is_fd_known(fd)) /* non-blocked on creation */
+     return 0;
+#endif
   do
     r = fcntl(fd, F_GETFL);
   while (r == -1 && errno == EINTR);
@@ -541,7 +587,10 @@ int uv__nonblock(int fd, int set) {
 int uv__cloexec(int fd, int set) {
   int flags;
   int r;
-
+#if DPDK_PORT
+    if(libuv_is_fd_known(fd))
+        return 0;
+#endif
   do
     r = fcntl(fd, F_GETFD);
   while (r == -1 && errno == EINTR);
@@ -576,7 +625,10 @@ int uv__cloexec(int fd, int set) {
  */
 int uv__dup(int fd) {
   int err;
-
+#if DPDK_PORT
+    if(libuv_is_fd_known(fd))
+        return fd;
+#endif
   fd = dup(fd);
 
   if (fd == -1)
@@ -590,13 +642,77 @@ int uv__dup(int fd) {
 
   return fd;
 }
+#if DPDK_PORT
 
+int copy_from_iovec(void *arg,char *buf,int size)
+{
+    dpdk_to_iovec_t *dpdk_to_iovec;
+    int to_copy,copied = 0;
 
+    dpdk_to_iovec = (dpdk_to_iovec_t *)arg;
+    if ((dpdk_to_iovec == NULL) || (dpdk_to_iovec->msg == NULL)) {
+        return;
+    }
+    while(copied < size) {
+        if(dpdk_to_iovec->msg->msg_iov_len == dpdk_to_iovec->current_iovec_idx)
+            break;
+        to_copy = dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len - dpdk_to_iovec->current_iovec_offset;
+        memcpy(&buf[copied],
+               &dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base[dpdk_to_iovec->current_iovec_offset],
+               to_copy);
+        copied += to_copy;
+        dpdk_to_iovec->current_iovec_offset += to_copy;
+        if(dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len == dpdk_to_iovec->current_iovec_offset) {
+            dpdk_to_iovec->current_iovec_idx++;
+            dpdk_to_iovec->current_iovec_offset = 0;
+        } 
+    }
+    return copied;
+}
+
+void copy_to_iovec(void *arg,char *buf,int size)
+{
+    dpdk_to_iovec_t *dpdk_to_iovec;
+    int to_copy,copied = 0;
+
+    dpdk_to_iovec = (dpdk_to_iovec_t *)arg;
+    if ((dpdk_to_iovec == NULL) || (dpdk_to_iovec->msg == NULL)) {
+        return;
+    }
+    while(copied < size) {
+        if(dpdk_to_iovec->msg->msg_iov_len == dpdk_to_iovec->current_iovec_idx)
+            break;
+        to_copy = dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len - dpdk_to_iovec->current_iovec_offset;
+        memcpy(&dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base[dpdk_to_iovec->current_iovec_offset],
+               &buf[copied],to_copy);
+        copied += to_copy;
+        dpdk_to_iovec->current_iovec_offset += to_copy;
+        if(dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len == dpdk_to_iovec->current_iovec_offset) {
+            dpdk_to_iovec->current_iovec_idx++;
+            dpdk_to_iovec->current_iovec_offset = 0;
+        } 
+    }
+}
+#endif
 ssize_t uv__recvmsg(int fd, struct msghdr* msg, int flags) {
   struct cmsghdr* cmsg;
   ssize_t rc;
   int* pfd;
   int* end;
+#if DPDK_PORT
+  dpdk_to_iovec_t dpdk_to_iovec;
+  int i,len = 0;
+  /* first determine how much may be consumed */
+  for(i = 0;i < msg.msg_iovlen;i++) {
+       len += msg.msg_iov[i].iov_len;
+  }
+  /* prepare the argument for copying from DPDK's mbufs to iovec */
+  dpdk_to_iovec.msg = msg;
+  dpdk_to_iovec.current_iovec_idx = 0;
+  dpdk_to_iovec.current_iovec_offset = 0;
+  /* DPDK will call copy_to_iovec. the flags are currently ignored */
+  rc = libuv_app_recvmsg(fd,&dpdk_to_iovec,len,flags,copy_to_iovec);
+#else
 #if defined(__linux__)
   static int no_msg_cmsg_cloexec;
   if (no_msg_cmsg_cloexec == 0) {
@@ -614,6 +730,7 @@ ssize_t uv__recvmsg(int fd, struct msghdr* msg, int flags) {
   }
 #else
   rc = recvmsg(fd, msg, flags);
+#endif
 #endif
   if (rc == -1)
     return -errno;

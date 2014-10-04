@@ -76,7 +76,9 @@ static unsigned long read_cpufreq(unsigned int cpunum);
 
 int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
   int fd;
-
+#if DPDK_PORT
+  /* call here dpdk_libinit */
+#endif
   fd = uv__epoll_create1(UV__EPOLL_CLOEXEC);
 
   /* epoll_create1() can fail either because it's not implemented (old kernel)
@@ -113,7 +115,10 @@ void uv__platform_invalidate_fd(uv_loop_t* loop, int fd) {
   struct uv__epoll_event dummy;
   uintptr_t i;
   uintptr_t nfds;
-
+#if DPDK_PORT
+  if(libuv_is_fd_known(fd))
+     return;
+#endif
   assert(loop->watchers != NULL);
 
   events = (struct uv__epoll_event*) loop->watchers[loop->nwatchers];
@@ -164,6 +169,10 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     assert(w->pevents != 0);
     assert(w->fd >= 0);
     assert(w->fd < (int) loop->nwatchers);
+#if DPDK_PORT
+    if(libuv_is_fd_known(fd))
+     continue;
+#endif
 
     e.events = w->pevents;
     e.data = w->fd;
