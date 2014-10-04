@@ -35,7 +35,9 @@
 #if defined(IPV6_LEAVE_GROUP) && !defined(IPV6_DROP_MEMBERSHIP)
 # define IPV6_DROP_MEMBERSHIP IPV6_LEAVE_GROUP
 #endif
-
+#if DPDK_PORT
+#include "dpdk_port.h"
+#endif
 
 static void uv__udp_run_completed(uv_udp_t* handle);
 static void uv__udp_io(uv_loop_t* loop, uv__io_t* w, unsigned int revents);
@@ -147,6 +149,10 @@ static void uv__udp_recvmsg(uv_udp_t* handle) {
   uv_buf_t buf;
   int flags;
   int count;
+#if DPDK_PORT
+  dpdk_to_iovec_t dpdk_to_iovec;
+  int i;
+#endif
 
   assert(handle->recv_cb != NULL);
   assert(handle->alloc_cb != NULL);
@@ -170,12 +176,19 @@ static void uv__udp_recvmsg(uv_udp_t* handle) {
     h.msg_namelen = sizeof(peer);
     h.msg_iov = (void*) &buf;
     h.msg_iovlen = 1;
-
+#if DPDK_PORT
+    /* prepare the argument for copying from DPDK's mbufs to iovec */
+    dpdk_to_iovec.msg = &h;
+    dpdk_to_iovec.current_iovec_idx = 0;
+    dpdk_to_iovec.current_iovec_offset = 0;
+    /* DPDK will call copy_to_iovec. the flags are currently ignored */
+    nread = libuv_app_recvmsg(handle->io_watcher.fd, &h, buf.len, 0 /*flags*/,copy_to_iovec);
+#else
     do {
       nread = recvmsg(handle->io_watcher.fd, &h, 0);
     }
     while (nread == -1 && errno == EINTR);
-
+#endif
     if (nread == -1) {
       if (errno == EAGAIN || errno == EWOULDBLOCK)
         handle->recv_cb(handle, 0, &buf, NULL, 0);
@@ -209,28 +222,39 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
   QUEUE* q;
   struct msghdr h;
   ssize_t size;
-
+#if DPDK_PORT
+  int i;
+#endif
   while (!QUEUE_EMPTY(&handle->write_queue)) {
     q = QUEUE_HEAD(&handle->write_queue);
     assert(q != NULL);
 
     req = QUEUE_DATA(q, uv_udp_send_t, queue);
     assert(req != NULL);
-
     memset(&h, 0, sizeof h);
     h.msg_name = &req->addr;
     h.msg_namelen = (req->addr.ss_family == AF_INET6 ?
       sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in));
     h.msg_iov = (struct iovec*) req->bufs;
     h.msg_iovlen = req->nbufs;
-
+#if DPDK_PORT
+    size = 0;
+    for(i = 0; < h.msg_iovlen;i++) {
+        size += h.msg_iov[i].iov_len;
+    }
+    size = libuv_app_sendmsg(handle->io_watcher.fd,&h,size,0,
+                            ((struct sockaddr_in *)h.msg_name)->sin_addr.s_addr,
+                            ((struct sockaddr_in *)h.msg_name)->sin_port,
+                            copy_from_iovec);
+#else
+    
     do {
       size = sendmsg(handle->io_watcher.fd, &h, 0);
     } while (size == -1 && errno == EINTR);
 
     if (size == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
       break;
-
+#endif
     req->status = (size == -1 ? -errno : size);
 
     /* Sending a datagram is an atomic operation: either all data
@@ -255,7 +279,11 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
  */
 static int uv__set_reuse(int fd) {
   int yes;
-
+#if DPDK_PORT
+  yes = 1;
+  if(libuv_app_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)))
+      return -1;
+#else
 #if defined(SO_REUSEPORT) && !defined(__linux__)
   yes = 1;
   if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes)))
@@ -265,7 +293,7 @@ static int uv__set_reuse(int fd) {
   if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)))
     return -errno;
 #endif
-
+#endif
   return 0;
 }
 
@@ -316,12 +344,17 @@ int uv__udp_bind(uv_udp_t* handle,
     goto out;
 #endif
   }
-
+#if DPDK_PORT
+  if (libuv_app_bind(fd, addr, addrlen)) {
+      err = -1;
+      goto out;
+  }
+#else
   if (bind(fd, addr, addrlen)) {
     err = -errno;
     goto out;
   }
-
+#endif
   if (addr->sa_family == AF_INET6)
     handle->flags |= UV_HANDLE_IPV6;
 
@@ -430,6 +463,9 @@ int uv__udp_try_send(uv_udp_t* handle,
   int err;
   struct msghdr h;
   ssize_t size;
+#if DPDK_PORT
+  int i;
+#endif
 
   assert(nbufs > 0);
 
@@ -446,7 +482,16 @@ int uv__udp_try_send(uv_udp_t* handle,
   h.msg_namelen = addrlen;
   h.msg_iov = (struct iovec*) bufs;
   h.msg_iovlen = nbufs;
-
+#if DPDK_PORT
+    size = 0;
+    for(i = 0; < h.msg_iovlen;i++) {
+        size += h.msg_iov[i].iov_len;
+    }
+    size = libuv_app_sendmsg(handle->io_watcher.fd,&h,size,0,
+                            ((struct sockaddr_in *)h.msg_name)->sin_addr.s_addr,
+                            ((struct sockaddr_in *)h.msg_name)->sin_port,
+                            copy_from_iovec);
+#else
   do {
     size = sendmsg(handle->io_watcher.fd, &h, 0);
   } while (size == -1 && errno == EINTR);
@@ -457,7 +502,7 @@ int uv__udp_try_send(uv_udp_t* handle,
     else
       return -errno;
   }
-
+#endif
   return size;
 }
 
@@ -492,7 +537,15 @@ static int uv__udp_set_membership4(uv_udp_t* handle,
   default:
     return -EINVAL;
   }
-
+#if DPDK_PORT
+  if (libuv_app_setsockopt(handle->io_watcher.fd,
+                 IPPROTO_IP,
+                 optname,
+                 &mreq,
+                 sizeof(mreq))) {
+    return -1;
+  }
+#else
   if (setsockopt(handle->io_watcher.fd,
                  IPPROTO_IP,
                  optname,
@@ -500,6 +553,7 @@ static int uv__udp_set_membership4(uv_udp_t* handle,
                  sizeof(mreq))) {
     return -errno;
   }
+#endif
 
   return 0;
 }
@@ -535,7 +589,15 @@ static int uv__udp_set_membership6(uv_udp_t* handle,
   default:
     return -EINVAL;
   }
-
+#if DPDK_PORT
+  if (libuv_app_setsockopt(handle->io_watcher.fd,
+                 IPPROTO_IPV6,
+                 optname,
+                 &mreq,
+                 sizeof(mreq))) {
+    return -errno;
+  }
+#else
   if (setsockopt(handle->io_watcher.fd,
                  IPPROTO_IPV6,
                  optname,
@@ -543,7 +605,7 @@ static int uv__udp_set_membership6(uv_udp_t* handle,
                  sizeof(mreq))) {
     return -errno;
   }
-
+#endif
   return 0;
 }
 
@@ -610,10 +672,13 @@ static int uv__setsockopt_maybe_char(uv_udp_t* handle, int option, int val) {
 
   if (val < 0 || val > 255)
     return -EINVAL;
-
+#if DPDK_PORT
+  if (libuv_app_setsockopt(handle->io_watcher.fd, IPPROTO_IP, option, &arg, sizeof(arg)))
+    return -1;
+#else
   if (setsockopt(handle->io_watcher.fd, IPPROTO_IP, option, &arg, sizeof(arg)))
     return -errno;
-
+#endif
   return 0;
 }
 
@@ -634,10 +699,13 @@ int uv_udp_set_broadcast(uv_udp_t* handle, int on) {
 int uv_udp_set_ttl(uv_udp_t* handle, int ttl) {
   if (ttl < 1 || ttl > 255)
     return -EINVAL;
-
+#if DPDK_PORT
+  if (libuv_app_setsockopt(handle->io_watcher.fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)))
+    return -1;
+#else
   if (setsockopt(handle->io_watcher.fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)))
     return -errno;
-
+#endif
   return 0;
 }
 
@@ -677,6 +745,15 @@ int uv_udp_set_multicast_interface(uv_udp_t* handle, const char* interface_addr)
   }
 
   if (addr_st.ss_family == AF_INET) {
+#if DPDK_PORT
+    if (libuv_app_setsockopt(handle->io_watcher.fd,
+                   IPPROTO_IP,
+                   IP_MULTICAST_IF,
+                   (void*) &addr4->sin_addr,
+                   sizeof(addr4->sin_addr)) == -1) {
+      return -1;
+    }
+#else
     if (setsockopt(handle->io_watcher.fd,
                    IPPROTO_IP,
                    IP_MULTICAST_IF,
@@ -684,6 +761,7 @@ int uv_udp_set_multicast_interface(uv_udp_t* handle, const char* interface_addr)
                    sizeof(addr4->sin_addr)) == -1) {
       return -errno;
     }
+#endif
   } else if (addr_st.ss_family == AF_INET6) {
     if (setsockopt(handle->io_watcher.fd,
                    IPPROTO_IPV6,
@@ -711,10 +789,13 @@ int uv_udp_getsockname(const uv_udp_t* handle,
 
   /* sizeof(socklen_t) != sizeof(int) on some systems. */
   socklen = (socklen_t) *namelen;
-
+#if DPDK_PORT
+  if (libuv_app_getsockname(handle->io_watcher.fd, name, &socklen))
+    return -1;
+#else
   if (getsockname(handle->io_watcher.fd, name, &socklen))
     return -errno;
-
+#endif
   *namelen = (int) socklen;
   return 0;
 }
