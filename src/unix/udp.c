@@ -224,6 +224,7 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
   ssize_t size;
 #if DPDK_PORT
   int i;
+  dpdk_to_iovec_t dpdk_to_iovec; 
 #endif
   while (!QUEUE_EMPTY(&handle->write_queue)) {
     q = QUEUE_HEAD(&handle->write_queue);
@@ -242,7 +243,10 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
     for(i = 0; < h.msg_iovlen;i++) {
         size += h.msg_iov[i].iov_len;
     }
-    size = libuv_app_sendmsg(handle->io_watcher.fd,&h,size,0,
+    dpdk_to_iovec.msg = &h;
+    dpdk_to_iovec.current_iovec_idx = 0;
+    dpdk_to_iovec.current_iovec_offset = 0;
+    size = libuv_app_udp_sendmsg(handle->io_watcher.fd,&dpdk_to_iovec,size,0,
                             ((struct sockaddr_in *)h.msg_name)->sin_addr.s_addr,
                             ((struct sockaddr_in *)h.msg_name)->sin_port,
                             copy_from_iovec);
@@ -465,6 +469,7 @@ int uv__udp_try_send(uv_udp_t* handle,
   ssize_t size;
 #if DPDK_PORT
   int i;
+  dpdk_to_iovec_t dpdk_to_iovec;
 #endif
 
   assert(nbufs > 0);
@@ -483,11 +488,14 @@ int uv__udp_try_send(uv_udp_t* handle,
   h.msg_iov = (struct iovec*) bufs;
   h.msg_iovlen = nbufs;
 #if DPDK_PORT
-    size = 0;
-    for(i = 0; < h.msg_iovlen;i++) {
-        size += h.msg_iov[i].iov_len;
-    }
-    size = libuv_app_sendmsg(handle->io_watcher.fd,&h,size,0,
+  size = 0;
+  for(i = 0; < h.msg_iovlen;i++) {
+      size += h.msg_iov[i].iov_len;
+  }
+  dpdk_to_iovec.msg = &h;
+  dpdk_to_iovec.current_iovec_idx = 0;
+  dpdk_to_iovec.current_iovec_offset = 0;
+  size = libuv_app_udp_sendmsg(handle->io_watcher.fd,&dpdk_to_iovec,size,0,
                             ((struct sockaddr_in *)h.msg_name)->sin_addr.s_addr,
                             ((struct sockaddr_in *)h.msg_name)->sin_port,
                             copy_from_iovec);

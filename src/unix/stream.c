@@ -616,6 +616,13 @@ static void uv__drain(uv_stream_t* stream) {
     uv__req_unregister(stream->loop, req);
 
     err = 0;
+#if DPDK_PORT
+    if(libuv_is_fd_known(fd)) {
+        if(libuv_app_close(uv__stream_fd(stream))
+            err = -errno;
+    }
+    else
+#endif
     if (shutdown(uv__stream_fd(stream), SHUT_WR))
       err = -errno;
 
@@ -766,11 +773,19 @@ start:
     while (n == -1 && errno == EINTR);
   } else {
     do {
+#if DPDK_PORT
+       dpdk_to_iovec_t dpdk_to_iovec;
+       dpdk_to_iovec.msg = &msg;
+       dpdk_to_iovec.current_iovec_idx = 0;
+       dpdk_to_iovec.current_iovec_offset = 0;
+       n = libuv_app_tcp_sendmsg(uv__stream_fd(stream), &dpdk_to_iovec, len, 0, copy_from_iovec);
+#else
       if (iovcnt == 1) {
         n = write(uv__stream_fd(stream), iov[0].iov_base, iov[0].iov_len);
       } else {
         n = writev(uv__stream_fd(stream), iov, iovcnt);
       }
+#endif
     }
     while (n == -1 && errno == EINTR);
   }
@@ -890,7 +905,13 @@ uv_handle_type uv__handle_type(int fd) {
     return UV_UNKNOWN_HANDLE;
 
   len = sizeof type;
-
+#if DPDK_PORT
+  if(libuv_is_fd_known(fd)) {
+      if (libuv_app_getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &len))
+         return UV_UNKNOWN_HANDLE;
+  }
+  else
+#endif
   if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &len))
     return UV_UNKNOWN_HANDLE;
 
@@ -1053,7 +1074,11 @@ static void uv__read(uv_stream_t* stream) {
 
     if (!is_ipc) {
       do {
+#if DPDK_PORT
+        nread = libuv_app_tcp_receive(fd,buf.base,buf.len);
+#else
         nread = read(uv__stream_fd(stream), buf.base, buf.len);
+#endif
       }
       while (nread < 0 && errno == EINTR);
     } else {
@@ -1222,11 +1247,21 @@ static void uv__stream_connect(uv_stream_t* stream) {
   } else {
     /* Normal situation: we need to get the socket error from the kernel. */
     assert(uv__stream_fd(stream) >= 0);
+#if DPDK_PORT
+    if(libuv_is_fd_known(uv__stream_fd(stream)))
+        libuv_app_getsockopt(uv__stream_fd(stream),
+               SOL_SOCKET,
+               SO_ERROR,
+               &error,
+               &errorsize);
+    else
+#endif
     getsockopt(uv__stream_fd(stream),
                SOL_SOCKET,
                SO_ERROR,
                &error,
                &errorsize);
+
     error = -error;
   }
 
