@@ -329,6 +329,10 @@ int uv__udp_bind(uv_udp_t* handle,
     fd = err;
     handle->io_watcher.fd = fd;
   }
+#if DPDK_PORT
+  /* set udp->io_watcher as userdata of the socket */
+  libuv_app_set_user_data(fd,handle);
+#endif
 
   if (flags & UV_UDP_REUSEADDR) {
     err = uv__set_reuse(fd);

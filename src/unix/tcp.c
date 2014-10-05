@@ -47,6 +47,7 @@ static int maybe_new_socket(uv_tcp_t* handle, int domain, int flags) {
   sockfd = err;
 #if DPDK_PORT
   /* set tcp->io_watcher as userdata of the socket */
+  libuv_app_set_user_data(uv__stream_fd(handle),handle);
 #endif
   err = uv__stream_open((uv_stream_t*) handle, sockfd, flags);
   if (err) {
