@@ -151,7 +151,6 @@ static void uv__udp_recvmsg(uv_udp_t* handle) {
   int count;
 #if DPDK_PORT
   dpdk_to_iovec_t dpdk_to_iovec;
-  int i;
 #endif
 
   assert(handle->recv_cb != NULL);
@@ -182,7 +181,7 @@ static void uv__udp_recvmsg(uv_udp_t* handle) {
     dpdk_to_iovec.current_iovec_idx = 0;
     dpdk_to_iovec.current_iovec_offset = 0;
     /* DPDK will call copy_to_iovec. the flags are currently ignored */
-    nread = libuv_app_recvmsg(handle->io_watcher.fd, &h, buf.len, 0 /*flags*/,copy_to_iovec);
+    nread = libuv_app_recvmsg(handle->io_watcher.fd, &dpdk_to_iovec, buf.len, 0 /*flags*/,copy_to_iovec);
 #else
     do {
       nread = recvmsg(handle->io_watcher.fd, &h, 0);
@@ -240,7 +239,7 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
     h.msg_iovlen = req->nbufs;
 #if DPDK_PORT
     size = 0;
-    for(i = 0; < h.msg_iovlen;i++) {
+    for(i = 0;i < (int)h.msg_iovlen;i++) {
         size += h.msg_iov[i].iov_len;
     }
     dpdk_to_iovec.msg = &h;
@@ -493,7 +492,7 @@ int uv__udp_try_send(uv_udp_t* handle,
   h.msg_iovlen = nbufs;
 #if DPDK_PORT
   size = 0;
-  for(i = 0; < h.msg_iovlen;i++) {
+  for(i = 0;i < (int)h.msg_iovlen;i++) {
       size += h.msg_iov[i].iov_len;
   }
   dpdk_to_iovec.msg = &h;
@@ -802,7 +801,7 @@ int uv_udp_getsockname(const uv_udp_t* handle,
   /* sizeof(socklen_t) != sizeof(int) on some systems. */
   socklen = (socklen_t) *namelen;
 #if DPDK_PORT
-  if (libuv_app_getsockname(handle->io_watcher.fd, name, &socklen))
+  if (libuv_app_getsockname(handle->io_watcher.fd, name, (int *)&socklen))
     return -1;
 #else
   if (getsockname(handle->io_watcher.fd, name, &socklen))

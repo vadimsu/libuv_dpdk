@@ -67,17 +67,28 @@
 #ifndef CLOCK_BOOTTIME
 # define CLOCK_BOOTTIME 7
 #endif
+#if DPDK_PORT
+#include "dpdk_port.h"
+#endif
 
 static int read_models(unsigned int numcpus, uv_cpu_info_t* ci);
 static int read_times(unsigned int numcpus, uv_cpu_info_t* ci);
 static void read_speeds(unsigned int numcpus, uv_cpu_info_t* ci);
 static unsigned long read_cpufreq(unsigned int cpunum);
 
-
 int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
   int fd;
 #if DPDK_PORT
-  /* call here dpdk_libinit */
+#define MAX_PKT_BURST 32
+  char *args[]= { "dummy","-c","f","-n","1","--","-p","1"}; 
+  int drv_poll_interval;
+
+  dpdk_linux_tcpip_init(8,args);
+  drv_poll_interval = get_max_drv_poll_interval_in_micros(0);
+  app_glue_init_poll_intervals(drv_poll_interval/(2*MAX_PKT_BURST),
+                             1000 /*timer_poll_interval*/,
+                             drv_poll_interval/(10*MAX_PKT_BURST),
+                             drv_poll_interval/(60*MAX_PKT_BURST));
 #endif
   fd = uv__epoll_create1(UV__EPOLL_CLOEXEC);
 
@@ -154,7 +165,10 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int fd;
   int op;
   int i;
-
+#if DPDK_PORT
+  uv_handle_t* handle;
+  uint8_t ports_to_poll[1] = { 0 };
+#endif
   if (loop->nfds == 0) {
     assert(QUEUE_EMPTY(&loop->watcher_queue));
     return;
@@ -170,7 +184,8 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     assert(w->fd >= 0);
     assert(w->fd < (int) loop->nwatchers);
 #if DPDK_PORT
-    if(libuv_is_fd_known(fd))
+    /* Linux are not aware DPDK's file descriptors */
+    if(libuv_is_fd_known(w->fd))
      continue;
 #endif
 
@@ -204,6 +219,49 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   count = 48; /* Benchmarks suggest this gives the best throughput. */
 
   for (;;) {
+#if DPDK_PORT
+    app_glue_periodic(0,ports_to_poll,1);
+    while((handle = (uv_handle_t*)app_glue_get_next_writer())!= NULL) {
+        switch(handle->type) {
+            case UV_TCP:
+                break;
+            case UV_UDP:
+                break;
+            default:
+                ;
+        }
+    }
+    while((handle = (uv_handle_t*)app_glue_get_next_reader())!= NULL) {
+        switch(handle->type) {
+            case UV_TCP:
+                break;
+            case UV_UDP:
+                break;
+            default:
+                ;
+        }
+    }
+    while((handle = (uv_handle_t*)app_glue_get_next_listener())!= NULL) {
+        switch(handle->type) {
+            case UV_TCP:
+                break;
+            case UV_UDP:
+                break;
+            default:
+                ;
+        }
+    }
+    while((handle = (uv_handle_t*)app_glue_get_next_closed())!= NULL) {
+        switch(handle->type) {
+            case UV_TCP:
+                break;
+            case UV_UDP:
+                break;
+            default:
+                ;
+        }
+    }
+#endif
     nfds = uv__epoll_wait(loop->backend_fd,
                           events,
                           ARRAY_SIZE(events),

@@ -26,7 +26,9 @@
 #include <unistd.h>
 #include <assert.h>
 #include <errno.h>
-
+#if DPDK_PORT
+#include "dpdk_port.h"
+#endif
 
 int uv_tcp_init(uv_loop_t* loop, uv_tcp_t* tcp) {
   uv__stream_init(loop, (uv_stream_t*)tcp, UV_TCP);
@@ -192,7 +194,7 @@ int uv_tcp_getsockname(const uv_tcp_t* handle,
   /* sizeof(socklen_t) != sizeof(int) on some systems. */
   socklen = (socklen_t) *namelen;
 #if DPDK_PORT
-  if (libuv_app_getsockname(uv__stream_fd(handle), name, &socklen))
+  if (libuv_app_getsockname(uv__stream_fd(handle), name, (int *)&socklen))
     return -errno;
 #else
   if (getsockname(uv__stream_fd(handle), name, &socklen))
@@ -217,7 +219,7 @@ int uv_tcp_getpeername(const uv_tcp_t* handle,
   /* sizeof(socklen_t) != sizeof(int) on some systems. */
   socklen = (socklen_t) *namelen;
 #if DPDK_PORT
-  if (libuv_app_getpeername(uv__stream_fd(handle), name, &socklen))
+  if (libuv_app_getpeername(uv__stream_fd(handle), name, (int *)&socklen))
     return -errno;
 #else
   if (getpeername(uv__stream_fd(handle), name, &socklen))

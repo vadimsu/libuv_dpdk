@@ -23,6 +23,7 @@
 
 #ifndef UV_H
 #define UV_H
+#define DPDK_PORT 1
 #ifdef __cplusplus
 extern "C" {
 #endif

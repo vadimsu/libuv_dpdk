@@ -184,7 +184,7 @@ int uv__socket_sockopt(uv_handle_t* handle, int optname, int* value) {
 #if DPDK_PORT
   if(libuv_is_fd_known(fd)) {
       if (*value == 0)
-          r = libuv_app_getsockopt(fd, SOL_SOCKET, optname, value, &len);
+          r = libuv_app_getsockopt(fd, SOL_SOCKET, optname, value, (int *)&len);
       else
           r = libuv_app_setsockopt(fd, SOL_SOCKET, optname, (const void*) value, len); 
       return r;
@@ -397,7 +397,6 @@ int uv__socket(int domain, int type, int protocol) {
   if (errno != EINVAL)
     return -errno;
 #endif
-#endif
 #if DPDK_PORT
   if((domain == AF_INET)&&((type == SOCK_STREAM)||(type == SOCK_DGRAM)||(type == SOCK_RAW))) {
       sockfd = libuv_app_socket(domain, type, protocol);
@@ -436,16 +435,16 @@ int uv__accept(int sockfd) {
   assert(sockfd >= 0);
 
   while (1) {
+    static int no_accept4;
 #if DPDK_PORT
-    if(libuv_is_fd_known(fd)) {
+    if(libuv_is_fd_known(sockfd)) {
        peerfd = libuv_app_accept(sockfd);
        if(peerfd > 0)
           return peerfd;
        continue;
     }
 #endif
-#if defined(__linux__) || __FreeBSD__ >= 10
-    static int no_accept4;
+#if defined(__linux__) || __FreeBSD__ >= 10 
 
     if (no_accept4)
       goto skip;
@@ -651,18 +650,18 @@ int copy_from_iovec(void *arg,char *buf,int size)
 
     dpdk_to_iovec = (dpdk_to_iovec_t *)arg;
     if ((dpdk_to_iovec == NULL) || (dpdk_to_iovec->msg == NULL)) {
-        return;
+        return -1;
     }
     while(copied < size) {
-        if(dpdk_to_iovec->msg->msg_iov_len == dpdk_to_iovec->current_iovec_idx)
+        if((int)dpdk_to_iovec->msg->msg_iovlen == dpdk_to_iovec->current_iovec_idx)
             break;
         to_copy = dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len - dpdk_to_iovec->current_iovec_offset;
         memcpy(&buf[copied],
-               &dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base[dpdk_to_iovec->current_iovec_offset],
+               &((char *)dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base)[dpdk_to_iovec->current_iovec_offset],
                to_copy);
         copied += to_copy;
         dpdk_to_iovec->current_iovec_offset += to_copy;
-        if(dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len == dpdk_to_iovec->current_iovec_offset) {
+        if((int)dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len == dpdk_to_iovec->current_iovec_offset) {
             dpdk_to_iovec->current_iovec_idx++;
             dpdk_to_iovec->current_iovec_offset = 0;
         } 
@@ -680,14 +679,14 @@ void copy_to_iovec(void *arg,char *buf,int size)
         return;
     }
     while(copied < size) {
-        if(dpdk_to_iovec->msg->msg_iov_len == dpdk_to_iovec->current_iovec_idx)
+        if((int)dpdk_to_iovec->msg->msg_iovlen == dpdk_to_iovec->current_iovec_idx)
             break;
         to_copy = dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len - dpdk_to_iovec->current_iovec_offset;
-        memcpy(&dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base[dpdk_to_iovec->current_iovec_offset],
+        memcpy(&((char *)dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base)[dpdk_to_iovec->current_iovec_offset],
                &buf[copied],to_copy);
         copied += to_copy;
         dpdk_to_iovec->current_iovec_offset += to_copy;
-        if(dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len == dpdk_to_iovec->current_iovec_offset) {
+        if((int)dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len == dpdk_to_iovec->current_iovec_offset) {
             dpdk_to_iovec->current_iovec_idx++;
             dpdk_to_iovec->current_iovec_offset = 0;
         } 
@@ -703,8 +702,8 @@ ssize_t uv__recvmsg(int fd, struct msghdr* msg, int flags) {
   dpdk_to_iovec_t dpdk_to_iovec;
   int i,len = 0;
   /* first determine how much may be consumed */
-  for(i = 0;i < msg.msg_iovlen;i++) {
-       len += msg.msg_iov[i].iov_len;
+  for(i = 0;i < (int)msg->msg_iovlen;i++) {
+       len += msg->msg_iov[i].iov_len;
   }
   /* prepare the argument for copying from DPDK's mbufs to iovec */
   dpdk_to_iovec.msg = msg;

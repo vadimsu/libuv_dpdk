@@ -56,6 +56,10 @@ struct uv__stream_select_s {
 };
 #endif /* defined(__APPLE__) */
 
+#if DPDK_PORT
+#include "dpdk_port.h"
+#endif
+
 static void uv__stream_connect(uv_stream_t*);
 static void uv__write(uv_stream_t* stream);
 static void uv__read(uv_stream_t* stream);
@@ -617,8 +621,8 @@ static void uv__drain(uv_stream_t* stream) {
 
     err = 0;
 #if DPDK_PORT
-    if(libuv_is_fd_known(fd)) {
-        if(libuv_app_close(uv__stream_fd(stream))
+    if(libuv_is_fd_known(uv__stream_fd(stream))) {
+        if(libuv_app_close(uv__stream_fd(stream)))
             err = -errno;
     }
     else
@@ -775,9 +779,16 @@ start:
     do {
 #if DPDK_PORT
        dpdk_to_iovec_t dpdk_to_iovec;
+       struct msghdr msg;
+       int len = 0;
+
+       msg.msg_iov = iov;
+       msg.msg_iovlen = iovcnt;
        dpdk_to_iovec.msg = &msg;
        dpdk_to_iovec.current_iovec_idx = 0;
        dpdk_to_iovec.current_iovec_offset = 0;
+       for(n = 0;n < iovcnt;n++)
+           len += msg.msg_iov[n].iov_len;
        n = libuv_app_tcp_sendmsg(uv__stream_fd(stream), &dpdk_to_iovec, len, 0, copy_from_iovec);
 #else
       if (iovcnt == 1) {
@@ -907,7 +918,7 @@ uv_handle_type uv__handle_type(int fd) {
   len = sizeof type;
 #if DPDK_PORT
   if(libuv_is_fd_known(fd)) {
-      if (libuv_app_getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &len))
+      if (libuv_app_getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, (int *)&len))
          return UV_UNKNOWN_HANDLE;
   }
   else
@@ -1075,7 +1086,7 @@ static void uv__read(uv_stream_t* stream) {
     if (!is_ipc) {
       do {
 #if DPDK_PORT
-        nread = libuv_app_tcp_receive(fd,buf.base,buf.len);
+        nread = libuv_app_tcp_receive(uv__stream_fd(stream),buf.base,buf.len);
 #else
         nread = read(uv__stream_fd(stream), buf.base, buf.len);
 #endif
@@ -1253,7 +1264,7 @@ static void uv__stream_connect(uv_stream_t* stream) {
                SOL_SOCKET,
                SO_ERROR,
                &error,
-               &errorsize);
+               (int *)&errorsize);
     else
 #endif
     getsockopt(uv__stream_fd(stream),

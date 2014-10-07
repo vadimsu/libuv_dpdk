@@ -13,4 +13,8 @@ int copy_from_iovec(void *arg,char *buf,int size);
 
 void copy_to_iovec(void *arg,char *buf,int size);
 
+#include "../ipaugenblick_master/ipaugenblick/libuv_app/libuv_app.h"
+
+#include "../ipaugenblick_master/ipaugenblick/api.h"
+
 #endif
