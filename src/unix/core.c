@@ -318,7 +318,7 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
   r = uv__loop_alive(loop);
   if (!r)
     uv__update_time(loop);
-
+printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__,__LINE__);
   while (r != 0 && loop->stop_flag == 0) {
     UV_TICK_START(loop, mode);
 
