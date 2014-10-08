@@ -441,7 +441,7 @@ int uv__accept(int sockfd) {
        peerfd = libuv_app_accept(sockfd);
        if(peerfd > 0)
           return peerfd;
-       continue;
+       break;
     }
 #endif
 #if defined(__linux__) || __FreeBSD__ >= 10 

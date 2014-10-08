@@ -533,6 +533,9 @@ int uv_accept(uv_stream_t* server, uv_stream_t* client) {
         uv__close(server->accepted_fd);
         goto done;
       }
+#if DPDK_PORT
+      libuv_app_set_user_data(server->accepted_fd, client);
+#endif
       break;
 
     case UV_UDP:

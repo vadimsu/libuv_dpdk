@@ -171,7 +171,6 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
 #endif
   if (loop->nfds == 0) {
     assert(QUEUE_EMPTY(&loop->watcher_queue));
-printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__,__LINE__);
     return;
   }
 
@@ -225,7 +224,7 @@ printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__
 //printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__,__LINE__);
     app_glue_periodic(0,ports_to_poll,1);
     while((handle = (uv_handle_t*)app_glue_get_next_writer())!= NULL) {
-        pe->events |= w->pevents & (UV__EPOLLIN | UV__EPOLLOUT);
+printf("%s %d\n",__FILE__,__LINE__);
         switch(handle->type) {
             case UV_TCP:
                 w = &((uv_tcp_t*)handle)->io_watcher;
@@ -242,9 +241,11 @@ printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__
         }
     }
     while((handle = (uv_handle_t*)app_glue_get_next_reader())!= NULL) {
+printf("%s %d\n",__FILE__,__LINE__);
         switch(handle->type) {
             case UV_TCP:
                 w = &((uv_tcp_t*)handle)->io_watcher;
+printf("%s %d %x\n",__FILE__,__LINE__,w->pevents);
                 if(w->pevents & UV__EPOLLIN)
                     w->cb(loop, w, UV__EPOLLIN);
                 break;
@@ -258,11 +259,13 @@ printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__
         }
     }
     while((handle = (uv_handle_t*)app_glue_get_next_listener())!= NULL) {
+printf("%s %d\n",__FILE__,__LINE__);
         switch(handle->type) {
             case UV_TCP:
                 w = &((uv_tcp_t*)handle)->io_watcher;
                 if(w->pevents & UV__EPOLLIN)
                     w->cb(loop, w, UV__EPOLLIN);
+printf("%s %d\n",__FILE__,__LINE__);
                 break;
             case UV_UDP:
                 w = &((uv_udp_t*)handle)->io_watcher;
@@ -274,6 +277,7 @@ printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__
         }
     }
     while((handle = (uv_handle_t*)app_glue_get_next_closed())!= NULL) {
+printf("%s %d\n",__FILE__,__LINE__);
         switch(handle->type) {
             case UV_TCP:
                 w = &((uv_tcp_t*)handle)->io_watcher;
