@@ -652,10 +652,18 @@ int copy_from_iovec(void *arg,char *buf,int size)
     if ((dpdk_to_iovec == NULL) || (dpdk_to_iovec->msg == NULL)) {
         return -1;
     }
+    if(size > 1448) {
+        printf("%s %d WARNING: attempting to write more than 1448, fixing\n",__FILE__,__LINE__);
+        size = 1448;
+    }
     while(copied < size) {
         if((int)dpdk_to_iovec->msg->msg_iovlen == dpdk_to_iovec->current_iovec_idx)
             break;
         to_copy = dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len - dpdk_to_iovec->current_iovec_offset;
+        if(to_copy > 1448) {
+            printf("%s %d WARNING: attempting to write more than 1448, fixing\n",__FILE__,__LINE__);
+            to_copy = 1448;
+        } 
         memcpy(&buf[copied],
                &((char *)dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base)[dpdk_to_iovec->current_iovec_offset],
                to_copy);
