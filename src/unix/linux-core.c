@@ -222,6 +222,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   for (;;) {
 #if DPDK_PORT
     app_glue_periodic(0,ports_to_poll,1);
+
     while((handle = (uv_handle_t*)app_glue_get_next_writer())!= NULL) {
         switch(handle->type) {
             case UV_TCP:

@@ -689,6 +689,8 @@ void copy_to_iovec(void *arg,char *buf,int size)
         if((int)dpdk_to_iovec->msg->msg_iovlen == dpdk_to_iovec->current_iovec_idx)
             break;
         to_copy = dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_len - dpdk_to_iovec->current_iovec_offset;
+        if(to_copy > (size - copied))
+            to_copy = size - copied;
         memcpy(&((char *)dpdk_to_iovec->msg->msg_iov[dpdk_to_iovec->current_iovec_idx].iov_base)[dpdk_to_iovec->current_iovec_offset],
                &buf[copied],to_copy);
         copied += to_copy;

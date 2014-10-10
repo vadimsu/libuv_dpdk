@@ -90,7 +90,7 @@ void uv__udp_finish_close(uv_udp_t* handle) {
 static void uv__udp_run_completed(uv_udp_t* handle) {
   uv_udp_send_t* req;
   QUEUE* q;
-
+  
   while (!QUEUE_EMPTY(&handle->write_completed_queue)) {
     q = QUEUE_HEAD(&handle->write_completed_queue);
     QUEUE_REMOVE(q);
@@ -104,10 +104,8 @@ static void uv__udp_run_completed(uv_udp_t* handle) {
     if (req->bufs != req->bufsml)
       free(req->bufs);
     req->bufs = NULL;
-
     if (req->send_cb == NULL)
       continue;
-
     /* req->status >= 0 == bytes written
      * req->status <  0 == errno
      */
@@ -136,6 +134,7 @@ static void uv__udp_io(uv_loop_t* loop, uv__io_t* w, unsigned int revents) {
     uv__udp_recvmsg(handle);
 
   if (revents & UV__POLLOUT) {
+printf("%s %d\n",__FILE__,__LINE__);
     uv__udp_sendmsg(handle);
     uv__udp_run_completed(handle);
   }
@@ -229,6 +228,7 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
   int i;
   dpdk_to_iovec_t dpdk_to_iovec; 
 #endif
+  if(QUEUE_EMPTY(&handle->write_queue)) printf("%s %d\n",__FILE__,__LINE__);
   while (!QUEUE_EMPTY(&handle->write_queue)) {
     q = QUEUE_HEAD(&handle->write_queue);
     assert(q != NULL);
@@ -249,10 +249,13 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
     dpdk_to_iovec.msg = &h;
     dpdk_to_iovec.current_iovec_idx = 0;
     dpdk_to_iovec.current_iovec_offset = 0;
-    size = libuv_app_udp_sendmsg(handle->io_watcher.fd,&dpdk_to_iovec,size,0,
+    i = libuv_app_udp_sendmsg(handle->io_watcher.fd,&dpdk_to_iovec,size,0,
                             ((struct sockaddr_in *)h.msg_name)->sin_addr.s_addr,
                             ((struct sockaddr_in *)h.msg_name)->sin_port,
                             copy_from_iovec);
+    req->status = (size == i) ? 0 : -1;
+    if(req->status)
+        break;
 #else
     
     do {
@@ -261,8 +264,8 @@ static void uv__udp_sendmsg(uv_udp_t* handle) {
 
     if (size == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
       break;
-#endif
     req->status = (size == -1 ? -errno : size);
+#endif 
 
     /* Sending a datagram is an atomic operation: either all data
      * is written or nothing is (and EMSGSIZE is raised). That is
@@ -456,12 +459,14 @@ int uv__udp_send(uv_udp_send_t* req,
   handle->send_queue_count++;
   QUEUE_INSERT_TAIL(&handle->write_queue, &req->queue);
   uv__handle_start(handle);
-
+#if DPDK_PORT
+  uv__udp_sendmsg(handle);
+#else
   if (empty_queue)
     uv__udp_sendmsg(handle);
   else
     uv__io_start(handle->loop, &handle->io_watcher, UV__POLLOUT);
-
+#endif
   return 0;
 }
 
