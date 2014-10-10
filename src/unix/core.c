@@ -318,7 +318,6 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
   r = uv__loop_alive(loop);
   if (!r)
     uv__update_time(loop);
-printf("%s %d$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$\n",__FILE__,__LINE__);
   while (r != 0 && loop->stop_flag == 0) {
     UV_TICK_START(loop, mode);
 
@@ -645,7 +644,7 @@ int uv__dup(int fd) {
 
 int copy_from_iovec(void *arg,char *buf,int size)
 {
-    dpdk_to_iovec_t *dpdk_to_iovec;
+    dpdk_to_iovec_t *dpdk_to_iovec; 
     int to_copy,copied = 0;
 
     dpdk_to_iovec = (dpdk_to_iovec_t *)arg;
@@ -699,6 +698,15 @@ void copy_to_iovec(void *arg,char *buf,int size)
             dpdk_to_iovec->current_iovec_offset = 0;
         } 
     }
+}
+
+void copy_to_iovec_with_addr(void *arg,char *buf,int size,void *addr)
+{
+    dpdk_to_iovec_t *dpdk_to_iovec;
+
+    dpdk_to_iovec = (dpdk_to_iovec_t *)arg;
+    memcpy(&dpdk_to_iovec->sin,addr,sizeof(dpdk_to_iovec->sin));
+    copy_to_iovec(arg,buf,size);
 }
 #endif
 ssize_t uv__recvmsg(int fd, struct msghdr* msg, int flags) {

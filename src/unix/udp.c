@@ -181,7 +181,7 @@ static void uv__udp_recvmsg(uv_udp_t* handle) {
     dpdk_to_iovec.current_iovec_idx = 0;
     dpdk_to_iovec.current_iovec_offset = 0;
     /* DPDK will call copy_to_iovec. the flags are currently ignored */
-    nread = libuv_app_recvmsg(handle->io_watcher.fd, &dpdk_to_iovec, buf.len, 0 /*flags*/,copy_to_iovec);
+    nread = libuv_app_recvmsg(handle->io_watcher.fd, &dpdk_to_iovec, buf.len, 0 /*flags*/,copy_to_iovec_with_addr);
 #else
     do {
       nread = recvmsg(handle->io_watcher.fd, &h, 0);
@@ -199,7 +199,11 @@ static void uv__udp_recvmsg(uv_udp_t* handle) {
       if (h.msg_namelen == 0)
         addr = NULL;
       else
+#if DPDK_PORT
+        addr = (const struct sockaddr*) &dpdk_to_iovec.sin;
+#else
         addr = (const struct sockaddr*) &peer;
+#endif
 
       flags = 0;
       if (h.msg_flags & MSG_TRUNC)
