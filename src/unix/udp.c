@@ -461,6 +461,7 @@ int uv__udp_send(uv_udp_send_t* req,
   uv__handle_start(handle);
 #if DPDK_PORT
   uv__udp_sendmsg(handle);
+  uv__udp_run_completed(handle);
 #else
   if (empty_queue)
     uv__udp_sendmsg(handle);
